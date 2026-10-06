@@ -70,8 +70,8 @@ When the plugin is installed and you're in iTerm2, its hooks also track Claude's
 | State | Tab | Alert |
 | - | - | - |
 | Working | green `#00d75f` | |
-| Needs input (permission prompt, question) | orange `#ff9500` | Dock bounce, "Claude needs input – <project>" banner, spoken phrase |
-| Finished | blue `#0a84ff` if the tab is in the background, else cleared | Dock bounce, "Claude finished – <project>" banner, spoken phrase |
+| Needs input (permission prompt, question) | orange `#ff9500` | Dock bounce, "Claude needs input - <project>" banner, spoken phrase |
+| Finished | blue `#0a84ff` if the tab is in the background, else cleared | Dock bounce, "Claude finished - <project>" banner, spoken phrase |
 
 It also forwards each event to iTerm2's own `cc-status` helper, which draws the status dot. That helper ships inside iTerm.app and isn't bundled here, so the dot appears only if your iTerm2 has it. Outside iTerm2 the hooks do nothing.
 
