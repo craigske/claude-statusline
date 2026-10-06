@@ -31,7 +31,8 @@ input=$(cat)
 
 state_dir="${TMPDIR:-/tmp}"
 state_dir="${state_dir%/}/claude-statusline-$(id -u)"
-mkdir -p "$state_dir" 2>/dev/null
+# No usable state dir (bad TMPDIR, read-only or full disk): the locks below can't work.
+mkdir -p "$state_dir" 2>/dev/null && [ -w "$state_dir" ] || exit 0
 
 conf="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/statusline/tabs.conf"
 
@@ -56,18 +57,47 @@ color_working=$(setting STATUSLINE_TAB_WORKING "#00d75f")
 color_waiting=$(setting STATUSLINE_TAB_WAITING "#ff9500")
 color_unread=$(setting STATUSLINE_TAB_UNREAD "#0a84ff")
 
-# take_lock NAME: wait until this process holds $state_dir/NAME.lock. Background jobs use it
-# to run one at a time per session. Call it in a subshell; the lock is released on exit.
+# take_lock NAME TOKEN WANTED: wait until this job holds $state_dir/NAME.lock. Background
+# jobs use it to run one at a time per session. WANTED is a command that fails once a newer
+# event has superseded this job; it's checked while waiting, so stale jobs leave the queue
+# at once instead of each taking the lock in turn. Call it in a subshell; the lock is
+# released on exit or signal, and only if it's still ours (TOKEN is written inside it).
 take_lock() {
   lock="$state_dir/$1.lock"
+  lock_token=$2
   tries=0
   until mkdir "$lock" 2>/dev/null; do
+    $3 || exit 0
     tries=$((tries + 1))
-    # A lock held this long is stale (a killed job); take it over.
-    [ "$tries" -ge 100 ] && { rmdir "$lock" 2>/dev/null; tries=0; }
+    if [ "$tries" -ge 100 ]; then
+      # Held for 100 polls (7-9s): assume a killed or hung job and take the lock over, killing its
+      # in-flight call (see tracked) so that call can't land after ours. mv is atomic, so
+      # when several waiters get here at once only one of them wins.
+      if mv "$lock" "$lock.stale.$lock_token" 2>/dev/null; then
+        stale_pid=$(cat "$lock.stale.$lock_token/child" 2>/dev/null)
+        [ -n "$stale_pid" ] && kill "$stale_pid" 2>/dev/null
+        rm -rf "$lock.stale.$lock_token"
+      fi
+      tries=0
+    fi
     sleep 0.05
   done
-  trap 'rmdir "$lock" 2>/dev/null' EXIT
+  printf '%s' "$lock_token" > "$lock/owner"
+  trap 'release_lock' EXIT
+  trap 'release_lock; exit 1' HUP INT TERM
+}
+
+# tracked CMD...: run CMD while holding the lock, recording its pid so a takeover can kill it.
+# Stdin goes through fd 3: a background command otherwise gets /dev/null, and dash ignores <&0.
+tracked() {
+  { "$@" <&3 & } 3<&0
+  printf '%s' "$!" > "$lock/child" 2>/dev/null
+  wait "$!"
+}
+
+release_lock() {
+  [ "$(cat "$lock/owner" 2>/dev/null)" = "$lock_token" ] && rm -rf "$lock"
+  trap - EXIT HUP INT TERM
 }
 
 # --- status dot: hand the event to iTerm2's cc-status, if installed ---
@@ -81,9 +111,10 @@ if [ "$want_dot" = 1 ]; then
       cc_token="$$.$(date +%s)"
       printf '%s' "$cc_token" > "$cc_seq"
       (
-        take_lock "cc-$sid"
-        [ "$(cat "$cc_seq" 2>/dev/null)" = "$cc_token" ] || exit 0
-        printf '%s' "$input" | "$cc_status"
+        cc_wanted() { [ "$(cat "$cc_seq" 2>/dev/null)" = "$cc_token" ]; }
+        take_lock "cc-$sid" "$cc_token" cc_wanted
+        cc_wanted || exit 0
+        printf '%s' "$input" | tracked "$cc_status"
       ) </dev/null >/dev/null 2>&1 &
       break
     fi
@@ -133,12 +164,11 @@ project=${cwd##*/}
 # one at a time per session, and each one stops once a newer event has replaced its state,
 # so the newest state is always applied last.
 (
-  take_lock "tab-$sid"
-
-  it2() { "$IT2" "$@" </dev/null; }
-
   current() { [ "$(cat "$state_file" 2>/dev/null)" = "$state" ]; }
+  take_lock "tab-$sid" "$$.$state" current
   current || exit 0
+
+  it2() { tracked "$IT2" "$@" </dev/null; }
   speak=""
 
   set_alert_var() { current && it2 session set-var user.claude_alert "$1" --session "$sid"; }
@@ -201,13 +231,14 @@ project=${cwd##*/}
     reset)
       clear_color
       set_alert_var ''
-      [ "$event" = "SessionEnd" ] && rm -f "$state_file"
+      # Only if no newer event (say, the first prompt after /clear) has replaced it.
+      [ "$event" = "SessionEnd" ] && current && rm -f "$state_file"
       ;;
   esac
 
   # Speaking takes seconds, so release the lock first, and stay quiet if the state has
   # already moved on (a permission prompt answered right away, say).
-  rmdir "$lock" 2>/dev/null; trap - EXIT
+  release_lock
   [ -n "$speak" ] && [ -n "$voice" ] && current && command -v say >/dev/null && say -v "$voice" "$speak"
 ) </dev/null >/dev/null 2>&1 &
 
