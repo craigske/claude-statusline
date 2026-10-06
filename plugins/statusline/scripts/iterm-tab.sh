@@ -22,9 +22,16 @@
 # Does nothing outside iTerm2. No jq or iTerm2 Python runtime needed.
 
 [ -n "$ITERM_SESSION_ID" ] || exit 0
+# Interactive sessions only: a `claude -p` started from inside a session inherits
+# ITERM_SESSION_ID and would otherwise repaint (and on SessionEnd, reset) the parent's tab.
+case "${CLAUDE_CODE_ENTRYPOINT:-cli}" in cli) ;; *) exit 0 ;; esac
 sid=${ITERM_SESSION_ID#*:}
 
 input=$(cat)
+
+state_dir="${TMPDIR:-/tmp}"
+state_dir="${state_dir%/}/claude-statusline-$(id -u)"
+mkdir -p "$state_dir" 2>/dev/null
 
 conf="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/statusline/tabs.conf"
 
@@ -53,8 +60,25 @@ color_unread=$(setting STATUSLINE_TAB_UNREAD "#0a84ff")
 if [ "$want_dot" = 1 ]; then
   for cc_status in /Applications/iTerm.app/Contents/Resources/utilities/cc-status "$HOME/.config/iterm2/cc-status"; do
     if [ -x "$cc_status" ]; then
-      # Detached: cc-status takes ~0.3s and PreToolUse/PostToolUse hooks block the tool.
-      (printf '%s' "$input" | "$cc_status") </dev/null >/dev/null 2>&1 &
+      # Detached, since cc-status takes ~0.3s and PreToolUse/PostToolUse hooks block the
+      # tool. Detached jobs can overlap, so run them one at a time per session and drop any
+      # that a newer event has superseded: the newest event always runs last.
+      cc_seq="$state_dir/cc-$sid.seq"
+      cc_lock="$state_dir/cc-$sid.lock"
+      cc_token="$$.$(date +%s)"
+      printf '%s' "$cc_token" > "$cc_seq"
+      (
+        tries=0
+        until mkdir "$cc_lock" 2>/dev/null; do
+          tries=$((tries + 1))
+          # A lock held this long is stale (a killed job); take it over.
+          [ "$tries" -ge 60 ] && { rmdir "$cc_lock" 2>/dev/null; tries=0; }
+          sleep 0.05
+        done
+        trap 'rmdir "$cc_lock" 2>/dev/null' EXIT
+        [ "$(cat "$cc_seq" 2>/dev/null)" = "$cc_token" ] || exit 0
+        printf '%s' "$input" | "$cc_status"
+      ) </dev/null >/dev/null 2>&1 &
       break
     fi
   done
@@ -92,9 +116,6 @@ esac
 IT2=/Applications/iTerm.app/Contents/Resources/utilities/it2
 [ -x "$IT2" ] || IT2=$(command -v it2) || exit 0
 
-state_dir="${TMPDIR:-/tmp}"
-state_dir="${state_dir%/}/claude-statusline-$(id -u)"
-mkdir -p "$state_dir" 2>/dev/null
 state_file="$state_dir/tab-$sid"
 [ "$(cat "$state_file" 2>/dev/null)" = "$state" ] && exit 0
 printf '%s' "$state" > "$state_file"
