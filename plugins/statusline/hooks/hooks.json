@@ -1,0 +1,18 @@
+{
+  "description": "iTerm2 tab color, status dot, and attention alerts. No-op outside iTerm2.",
+  "hooks": {
+    "SessionStart": [
+      { "matcher": "startup", "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/tabs-first-run.sh\"" }] },
+      { "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/iterm-tab.sh\"" }] }
+    ],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/iterm-tab.sh\"" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/iterm-tab.sh\"" }] }],
+    "PreToolUse": [{ "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/iterm-tab.sh\"" }] }],
+    "PostToolUse": [{ "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/iterm-tab.sh\"" }] }],
+    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/iterm-tab.sh\"" }] }],
+    "Notification": [{ "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/iterm-tab.sh\"" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/iterm-tab.sh\"" }] }],
+    "StopFailure": [{ "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/iterm-tab.sh\"" }] }],
+    "SubagentStop": [{ "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/iterm-tab.sh\"" }] }]
+  }
+}

@@ -1,17 +1,27 @@
 #!/usr/bin/env bash
 # Claude Code status line.
 # Reads the status-line JSON on stdin and prints one line of ANSI-colored segments:
-#   🌿 branch | 🌳 worktree ← original | 🔀 PR | 📋 issue | 📁 dir | 🤖 model | ⚡ effort
-#   🚀 fast | 🧠 thinking | 📊 context bar | ⏱️ 5h / 📅 7d limits | ✏️ lines | ⏰ time | 💰 cost
-# Requires: jq, git. Optional: gh (for the PR segment).
+#   🌿 branch | 🌳 worktree ← original | 🔀 PR | 🐙 gh account | 📋 issue | 📁 dir | 🤖 model | ⚡ effort
+#   🚀 fast | 🧠 thinking | 📡 remote | 📊 context bar | ⏱️ 5h / 📅 7d limits | ✏️ lines | ⏰ time | 💰 cost
+# Requires: jq, git. Optional: gh (for the PR and gh account segments).
 #
 # Environment (set in settings.json "env" or your shell):
-#   STATUSLINE_ISSUE_PREFIXES  Comma-separated issue key prefixes to look for in branch
-#                              names, e.g. "ENG,OPS". Empty = any KEY-123 shape.
+#   STATUSLINE_LINEAR_PREFIXES Comma-separated Linear team keys, e.g. "ENG". Tried first.
+#                              Empty = skip the Linear pass.
+#   STATUSLINE_JIRA_PREFIXES   Comma-separated Jira project keys, e.g. "OPS,SUP". Tried only
+#                              when no Linear key is found. Empty = any KEY-123 shape.
+#                              (STATUSLINE_ISSUE_PREFIXES is still read as an alias.)
 #   STATUSLINE_PR_TTL          Seconds to cache the PR lookup (default 300). 0 disables it.
+#   STATUSLINE_DEBUG_FILE      If set, each render's raw input JSON is written here (overwritten
+#                              every render). Use it to find field names. It holds session paths
+#                              and ids, so point it somewhere private.
 
 input=$(cat)
 jqr() { printf '%s' "$input" | jq -r "$1" 2>/dev/null; }
+
+if [ -n "${STATUSLINE_DEBUG_FILE:-}" ]; then
+  (umask 077; printf '%s' "$input" > "$STATUSLINE_DEBUG_FILE") 2>/dev/null
+fi
 
 cache_root="${TMPDIR:-/tmp}"
 cache_root="${cache_root%/}/claude-statusline-$(id -u)"
@@ -37,6 +47,16 @@ fast_mode=$(jqr '.fast_mode // empty')
 thinking_enabled=$(jqr '.thinking.enabled // empty')
 rl_5h=$(jqr '.rate_limits.five_hour.used_percentage // empty')
 rl_7d=$(jqr '.rate_limits.seven_day.used_percentage // empty')
+
+# --- remote control (session driven from claude.ai / FleetView) ---
+# The field name isn't documented yet, so probe the likely ones; first truthy match wins.
+# Capture a remote session with STATUSLINE_DEBUG_FILE, then narrow this to the real field.
+remote_flag=$(jqr '
+  (.remote_control // .is_remote // .driven_by_remote //
+   .session.remote // .session.driven_remotely //
+   .source == "remote" // .channel == "remote" // empty)
+  | if . == true or . == "true" or . == "remote" then "1" else empty end
+')
 
 # --- GitHub PR for current branch (cached; never hits gh on every render) ---
 pr_number=""
@@ -65,23 +85,67 @@ if [ "$pr_ttl" != "0" ] && [ -n "$cwd" ] && [ -n "$branch" ] && command -v gh >/
   fi
 fi
 
-# --- issue key: from branch, then worktree's original branch, then a pin file ---
-# Pin with: echo ENG-123 > "$(git rev-parse --git-dir)/statusline-issue"  (per-worktree, never tracked)
-issue_prefixes=$(printf '%s' "${STATUSLINE_ISSUE_PREFIXES:-}" | tr -d '[:space:]' | tr ',' '|')
-if [ -n "$issue_prefixes" ]; then
-  issue_re="(^|[/_-])(${issue_prefixes})-[0-9]+"
-else
-  issue_re="(^|[/_-])[A-Za-z][A-Za-z0-9]*-[0-9]+"
+# --- active gh account for the origin remote's host, only when 2+ accounts are logged in ---
+# Read from gh's hosts.yml rather than running gh: instant and offline.
+gh_account=""
+if [ -n "$cwd" ]; then
+  gh_remote=$(git -C "$cwd" --no-optional-locks remote get-url origin 2>/dev/null)
+  # https://host/o/r, ssh://git@host/o/r, git@host:o/r -> host
+  gh_host=$(printf '%s' "$gh_remote" | sed -E -e 's#^[a-z+]+://##' -e 's#^[^@/]*@##' -e 's#[:/].*$##')
+  gh_hosts_yml="${GH_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/gh}/hosts.yml"
+  if [ -n "$gh_host" ] && [ -f "$gh_hosts_yml" ]; then
+    gh_account=$(awk -v h="$gh_host" '
+      function indent(s) { match(s, /^ */); return RLENGTH }
+      /^[^[:space:]#]/ { in_host = ($1 == h ":"); users_indent = 0; next }
+      !in_host || /^[[:space:]]*(#|$)/ { next }
+      {
+        i = indent($0)
+        if (users_indent && i > users_indent) { n++; next }
+        users_indent = 0
+        if ($1 == "users:") users_indent = i
+        else if ($1 == "user:") user = $2
+      }
+      END { if (n >= 2 && user != "") print user }
+    ' "$gh_hosts_yml" 2>/dev/null)
+  fi
 fi
-issue_key() {
-  printf '%s' "$1" | grep -ioE "$issue_re" | head -n 1 | sed -E 's/^[/_-]//' | tr '[:lower:]' '[:upper:]'
-}
-issue=$(issue_key "$branch")
-[ -z "$issue" ] && issue=$(issue_key "$wt_orig_branch")
-if [ -z "$issue" ] && [ -n "$cwd" ]; then
+
+# --- issue key: Linear first, then Jira, else nothing ---
+# Each pass checks the branch, then the worktree's original branch, then a pin file, so a
+# Linear key anywhere beats a Jira key anywhere.
+# Pin with: echo ENG-123 > "$(git rev-parse --git-dir)/statusline-issue"  (per-worktree, never tracked)
+issue_pin_text=""
+if [ -n "$cwd" ]; then
   issue_pin=$(git -C "$cwd" --no-optional-locks rev-parse --git-path statusline-issue 2>/dev/null)
   case "$issue_pin" in /*) ;; ?*) issue_pin="$cwd/$issue_pin" ;; esac
-  [ -f "$issue_pin" ] && issue=$(head -n 1 "$issue_pin" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
+  [ -f "$issue_pin" ] && issue_pin_text=$(head -n 1 "$issue_pin" | tr -d '[:space:]')
+fi
+
+# "ENG, OPS" -> "ENG|OPS"
+prefix_alt() { printf '%s' "$1" | tr -d '[:space:]' | tr ',' '|'; }
+
+# First key matching regex $1 across the branch, the original branch, then the pin
+find_issue() {
+  local src key
+  for src in "$branch" "$wt_orig_branch" "$issue_pin_text"; do
+    [ -z "$src" ] && continue
+    key=$(printf '%s' "$src" | grep -ioE "$1" | head -n 1 | sed -E 's/^[/_-]//' | tr '[:lower:]' '[:upper:]')
+    [ -n "$key" ] && { printf '%s' "$key"; return; }
+  done
+}
+
+issue=""
+linear_prefixes=$(prefix_alt "${STATUSLINE_LINEAR_PREFIXES:-}")
+if [ -n "$linear_prefixes" ]; then
+  issue=$(find_issue "(^|[/_-])(${linear_prefixes})-[0-9]+")
+fi
+if [ -z "$issue" ]; then
+  jira_prefixes=$(prefix_alt "${STATUSLINE_JIRA_PREFIXES:-${STATUSLINE_ISSUE_PREFIXES:-}}")
+  if [ -n "$jira_prefixes" ]; then
+    issue=$(find_issue "(^|[/_-])(${jira_prefixes})-[0-9]+")
+  else
+    issue=$(find_issue "(^|[/_-])[A-Za-z][A-Za-z0-9]*-[0-9]+")
+  fi
 fi
 
 RESET="\033[0m"
@@ -112,6 +176,11 @@ if [ -n "$pr_number" ]; then
   parts="${parts}$(printf "${pr_color}🔀 PR #%s %s${RESET}" "$pr_number" "$pr_state") "
 fi
 
+# gh account — blue; only shown when you're logged in to more than one
+if [ -n "$gh_account" ]; then
+  parts="${parts}$(printf "\033[34m🐙 %s${RESET}" "$gh_account") "
+fi
+
 # Issue — violet
 if [ -n "$issue" ]; then
   parts="${parts}$(printf "\033[38;5;99m📋 %s${RESET}" "$issue") "
@@ -133,6 +202,11 @@ if [ "$fast_mode" = "true" ]; then
 fi
 if [ "$thinking_enabled" = "true" ]; then
   parts="${parts}$(printf "\033[2m🧠${RESET}") "
+fi
+
+# Remote — magenta so it stands out against the dim/cyan neighbors
+if [ -n "$remote_flag" ]; then
+  parts="${parts}$(printf "\033[35m📡 remote${RESET}") "
 fi
 
 # green <50, yellow 50–79, red 80+
