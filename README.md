@@ -100,7 +100,7 @@ This removes only the settings that point at `~/.claude/statusline/`. Restore an
 
 ## Attribution
 
-The iterm2 coloring by hooks portion of this came from an idea by @corymvogt Brilliant
+The iterm2 coloring by hooks portion of this came from an idea by [@corymvogt](https://github.com/corymvogt) Brilliant
 
 ## License
 
