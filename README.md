@@ -6,6 +6,9 @@ A dense, color-graded status line for [Claude Code](https://code.claude.com), pl
 🌿 eng-412-retry-uploads 🔀 PR #88 OPEN 📋 ENG-412 📁 api 🤖 Opus ⚡ high 📊 █████░░░ 62% ⏱️  5h 12% 📅 7d 30% ✏️  +42/-7 ⏰ 12m5s 💰 $1.23
 ```
 
+<img width="2490" height="223" alt="Screenshot 2026-10-06 at 3 05 31 PM" src="https://github.com/user-attachments/assets/a051e68f-f4d6-4184-975a-a80740a16291" />
+
+
 | Segment | Shows |
 | - | - |
 | 🌿 branch | Current git branch. Hidden inside a worktree |
