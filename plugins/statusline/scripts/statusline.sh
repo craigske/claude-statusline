@@ -2,16 +2,23 @@
 # Claude Code status line.
 # Reads the status-line JSON on stdin and prints one line of ANSI-colored segments:
 #   🌿 branch | 🌳 worktree ← original | 🔀 PR | 📋 issue | 📁 dir | 🤖 model | ⚡ effort
-#   🚀 fast | 🧠 thinking | 📊 context bar | ⏱️ 5h / 📅 7d limits | ✏️ lines | ⏰ time | 💰 cost
+#   🚀 fast | 🧠 thinking | 📡 remote | 📊 context bar | ⏱️ 5h / 📅 7d limits | ✏️ lines | ⏰ time | 💰 cost
 # Requires: jq, git. Optional: gh (for the PR segment).
 #
 # Environment (set in settings.json "env" or your shell):
 #   STATUSLINE_ISSUE_PREFIXES  Comma-separated issue key prefixes to look for in branch
 #                              names, e.g. "ENG,OPS". Empty = any KEY-123 shape.
 #   STATUSLINE_PR_TTL          Seconds to cache the PR lookup (default 300). 0 disables it.
+#   STATUSLINE_DEBUG_FILE      If set, each render's raw input JSON is written here (overwritten
+#                              every render). Use it to find field names. It holds session paths
+#                              and ids, so point it somewhere private.
 
 input=$(cat)
 jqr() { printf '%s' "$input" | jq -r "$1" 2>/dev/null; }
+
+if [ -n "${STATUSLINE_DEBUG_FILE:-}" ]; then
+  (umask 077; printf '%s' "$input" > "$STATUSLINE_DEBUG_FILE") 2>/dev/null
+fi
 
 cache_root="${TMPDIR:-/tmp}"
 cache_root="${cache_root%/}/claude-statusline-$(id -u)"
@@ -37,6 +44,16 @@ fast_mode=$(jqr '.fast_mode // empty')
 thinking_enabled=$(jqr '.thinking.enabled // empty')
 rl_5h=$(jqr '.rate_limits.five_hour.used_percentage // empty')
 rl_7d=$(jqr '.rate_limits.seven_day.used_percentage // empty')
+
+# --- remote control (session driven from claude.ai / FleetView) ---
+# The field name isn't documented yet, so probe the likely ones; first truthy match wins.
+# Capture a remote session with STATUSLINE_DEBUG_FILE, then narrow this to the real field.
+remote_flag=$(jqr '
+  (.remote_control // .is_remote // .driven_by_remote //
+   .session.remote // .session.driven_remotely //
+   .source == "remote" // .channel == "remote" // empty)
+  | if . == true or . == "true" or . == "remote" then "1" else empty end
+')
 
 # --- GitHub PR for current branch (cached; never hits gh on every render) ---
 pr_number=""
@@ -133,6 +150,11 @@ if [ "$fast_mode" = "true" ]; then
 fi
 if [ "$thinking_enabled" = "true" ]; then
   parts="${parts}$(printf "\033[2m🧠${RESET}") "
+fi
+
+# Remote — magenta so it stands out against the dim/cyan neighbors
+if [ -n "$remote_flag" ]; then
+  parts="${parts}$(printf "\033[35m📡 remote${RESET}") "
 fi
 
 # green <50, yellow 50–79, red 80+

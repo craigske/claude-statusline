@@ -13,11 +13,12 @@ A dense, color-graded status line for [Claude Code](https://code.claude.com), pl
 | 🔀 PR | GitHub PR for the branch, colored by state (needs `gh`; cached 5 min) |
 | 📋 issue | Issue key from the branch name (`ENG-412`), or a pinned one |
 | 📁 🤖 ⚡ 🚀 🧠 | Directory, model, effort level, fast mode, extended thinking |
+| 📡 remote | Session is being driven remotely (claude.ai / FleetView). The input field isn't documented yet, so this probes likely names |
 | 📊 | Context window use: green <50%, yellow <80%, red after that |
 | ⏱️ 📅 | 5-hour and 7-day rate-limit use, same colors |
 | ✏️ ⏰ 💰 | Lines changed, session time, and session cost (yellow at $1, red at $5) |
 
-The subagent line renders each row in the agent panel as `🔭 Explore · haiku-4-5 · ██░░ 60%`.
+The subagent line renders each row in the agent panel as `🔭 Explore · haiku-4-5 · ██░░ 60%`, with a 📡 after the model when the session is remote.
 
 ## Install
 
@@ -48,6 +49,7 @@ Set these in the `env` block of `~/.claude/settings.json`:
 | - | - | - |
 | `STATUSLINE_ISSUE_PREFIXES` | *(any)* | Comma-separated issue prefixes to match in branch names, e.g. `ENG,OPS`. Unset matches any `KEY-123` shape, which can pick up a false positive like `release-2026` |
 | `STATUSLINE_PR_TTL` | `300` | Seconds to cache the PR lookup. `0` turns the PR segment off |
+| `STATUSLINE_DEBUG_FILE` | *(unset)* | Path to write each render's raw input JSON to, overwritten every time. Handy for finding field names. It contains session ids and paths, so keep it somewhere private |
 
 **Pinning an issue.** If a branch has no key in its name, pin one for that worktree:
 
