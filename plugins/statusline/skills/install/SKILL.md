@@ -16,7 +16,8 @@ Plugins can't set `statusLine` themselves, so this skill copies the plugin's scr
 
 3. Report the installer's output. The status line appears on the next render.
 4. Mention the optional settings, which go in the `env` block of `~/.claude/settings.json`:
-   - `STATUSLINE_ISSUE_PREFIXES`: comma-separated issue key prefixes to pick out of branch names, for example `"ENG,OPS"`. When it's unset, any `KEY-123` shape matches.
+   - `STATUSLINE_LINEAR_PREFIXES`: comma-separated Linear team keys, for example `"ENG"`. These are tried first. When it's unset, the Linear pass is skipped.
+   - `STATUSLINE_JIRA_PREFIXES`: comma-separated Jira project keys, for example `"OPS,SUP"`. These are tried only when no Linear key is found. When it's unset, any `KEY-123` shape matches. `STATUSLINE_ISSUE_PREFIXES` is still accepted as an alias.
    - `STATUSLINE_PR_TTL`: how many seconds to cache the `gh pr view` lookup (default `300`). `0` hides the PR segment.
    - `STATUSLINE_DEBUG_FILE`: a path to write each render's raw input JSON to. Only for finding field names. Leave it unset otherwise.
    - To pin an issue for a branch with no key in its name: `echo ENG-123 > "$(git rev-parse --git-dir)/statusline-issue"`

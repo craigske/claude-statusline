@@ -6,8 +6,11 @@
 # Requires: jq, git. Optional: gh (for the PR segment).
 #
 # Environment (set in settings.json "env" or your shell):
-#   STATUSLINE_ISSUE_PREFIXES  Comma-separated issue key prefixes to look for in branch
-#                              names, e.g. "ENG,OPS". Empty = any KEY-123 shape.
+#   STATUSLINE_LINEAR_PREFIXES Comma-separated Linear team keys, e.g. "ENG". Tried first.
+#                              Empty = skip the Linear pass.
+#   STATUSLINE_JIRA_PREFIXES   Comma-separated Jira project keys, e.g. "OPS,SUP". Tried only
+#                              when no Linear key is found. Empty = any KEY-123 shape.
+#                              (STATUSLINE_ISSUE_PREFIXES is still read as an alias.)
 #   STATUSLINE_PR_TTL          Seconds to cache the PR lookup (default 300). 0 disables it.
 #   STATUSLINE_DEBUG_FILE      If set, each render's raw input JSON is written here (overwritten
 #                              every render). Use it to find field names. It holds session paths
@@ -82,23 +85,42 @@ if [ "$pr_ttl" != "0" ] && [ -n "$cwd" ] && [ -n "$branch" ] && command -v gh >/
   fi
 fi
 
-# --- issue key: from branch, then worktree's original branch, then a pin file ---
+# --- issue key: Linear first, then Jira, else nothing ---
+# Each pass checks the branch, then the worktree's original branch, then a pin file, so a
+# Linear key anywhere beats a Jira key anywhere.
 # Pin with: echo ENG-123 > "$(git rev-parse --git-dir)/statusline-issue"  (per-worktree, never tracked)
-issue_prefixes=$(printf '%s' "${STATUSLINE_ISSUE_PREFIXES:-}" | tr -d '[:space:]' | tr ',' '|')
-if [ -n "$issue_prefixes" ]; then
-  issue_re="(^|[/_-])(${issue_prefixes})-[0-9]+"
-else
-  issue_re="(^|[/_-])[A-Za-z][A-Za-z0-9]*-[0-9]+"
-fi
-issue_key() {
-  printf '%s' "$1" | grep -ioE "$issue_re" | head -n 1 | sed -E 's/^[/_-]//' | tr '[:lower:]' '[:upper:]'
-}
-issue=$(issue_key "$branch")
-[ -z "$issue" ] && issue=$(issue_key "$wt_orig_branch")
-if [ -z "$issue" ] && [ -n "$cwd" ]; then
+issue_pin_text=""
+if [ -n "$cwd" ]; then
   issue_pin=$(git -C "$cwd" --no-optional-locks rev-parse --git-path statusline-issue 2>/dev/null)
   case "$issue_pin" in /*) ;; ?*) issue_pin="$cwd/$issue_pin" ;; esac
-  [ -f "$issue_pin" ] && issue=$(head -n 1 "$issue_pin" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
+  [ -f "$issue_pin" ] && issue_pin_text=$(head -n 1 "$issue_pin" | tr -d '[:space:]')
+fi
+
+# "ENG, OPS" -> "ENG|OPS"
+prefix_alt() { printf '%s' "$1" | tr -d '[:space:]' | tr ',' '|'; }
+
+# First key matching regex $1 across the branch, the original branch, then the pin
+find_issue() {
+  local src key
+  for src in "$branch" "$wt_orig_branch" "$issue_pin_text"; do
+    [ -z "$src" ] && continue
+    key=$(printf '%s' "$src" | grep -ioE "$1" | head -n 1 | sed -E 's/^[/_-]//' | tr '[:lower:]' '[:upper:]')
+    [ -n "$key" ] && { printf '%s' "$key"; return; }
+  done
+}
+
+issue=""
+linear_prefixes=$(prefix_alt "${STATUSLINE_LINEAR_PREFIXES:-}")
+if [ -n "$linear_prefixes" ]; then
+  issue=$(find_issue "(^|[/_-])(${linear_prefixes})-[0-9]+")
+fi
+if [ -z "$issue" ]; then
+  jira_prefixes=$(prefix_alt "${STATUSLINE_JIRA_PREFIXES:-${STATUSLINE_ISSUE_PREFIXES:-}}")
+  if [ -n "$jira_prefixes" ]; then
+    issue=$(find_issue "(^|[/_-])(${jira_prefixes})-[0-9]+")
+  else
+    issue=$(find_issue "(^|[/_-])[A-Za-z][A-Za-z0-9]*-[0-9]+")
+  fi
 fi
 
 RESET="\033[0m"
