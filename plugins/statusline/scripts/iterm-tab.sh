@@ -53,7 +53,8 @@ color_unread=$(setting STATUSLINE_TAB_UNREAD "#0a84ff")
 if [ "$want_dot" = 1 ]; then
   for cc_status in /Applications/iTerm.app/Contents/Resources/utilities/cc-status "$HOME/.config/iterm2/cc-status"; do
     if [ -x "$cc_status" ]; then
-      printf '%s' "$input" | "$cc_status" >/dev/null 2>&1
+      # Detached: cc-status takes ~0.3s and PreToolUse/PostToolUse hooks block the tool.
+      (printf '%s' "$input" | "$cc_status") </dev/null >/dev/null 2>&1 &
       break
     fi
   done
@@ -61,8 +62,11 @@ fi
 
 [ "$want_colors" = 1 ] || [ "$want_alerts" = 1 ] || [ -n "$voice" ] || exit 0
 
+# First match wins: the top-level keys come before tool_input / tool_response, which can
+# hold the same key names.
 field() {
-  printf '%s' "$input" | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1
+  printf '%s' "$input" | grep -o "\"$1\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -n 1 \
+    | sed -e "s/^\"$1\"[[:space:]]*:[[:space:]]*\"//" -e 's/"$//'
 }
 
 event=$(field hook_event_name)
@@ -102,17 +106,23 @@ project=${cwd##*/}
 (
   it2() { "$IT2" "$@" </dev/null; }
 
+  # Jobs run concurrently; skip iTerm2 changes once a newer event has replaced this state.
+  current() { [ "$(cat "$state_file" 2>/dev/null)" = "$state" ]; }
+
+  set_alert_var() { current && it2 session set-var user.claude_alert "$1" --session "$sid"; }
+
   session_tty() {
     it2 session get-var tty --session "$sid" 2>/dev/null | tr -d '"\\'
   }
 
   set_color() {
-    [ "$want_colors" = 1 ] && it2 session set-color "$1" --session "$sid"
+    [ "$want_colors" = 1 ] && current && it2 session set-color "$1" --session "$sid"
   }
 
   # OSC 6 reset: there is no it2 command to clear a tab color.
   clear_color() {
     [ "$want_colors" = 1 ] || return 0
+    current || return 0
     tty=$(session_tty)
     [ -w "$tty" ] && printf '\033]6;1;bg;*;default\007' > "$tty"
   }
@@ -136,11 +146,11 @@ project=${cwd##*/}
   case "$state" in
     working)
       set_color "$color_working"
-      it2 session set-var user.claude_alert '' --session "$sid"
+      set_alert_var ''
       ;;
     waiting)
       set_color "$color_waiting"
-      it2 session set-var user.claude_alert 1 --session "$sid"
+      set_alert_var 1
       alert "Claude needs input - $project" "$say_waiting"
       ;;
     idle)
@@ -149,16 +159,16 @@ project=${cwd##*/}
       [ "$(cat "$state_file" 2>/dev/null)" = idle ] || exit 0
       if [ "$is_focused" -eq 0 ]; then
         clear_color
-        it2 session set-var user.claude_alert '' --session "$sid"
+        set_alert_var ''
       else
         set_color "$color_unread"
-        it2 session set-var user.claude_alert 1 --session "$sid"
+        set_alert_var 1
       fi
       alert "Claude finished - $project" "$say_done"
       ;;
     reset)
       clear_color
-      it2 session set-var user.claude_alert '' --session "$sid"
+      set_alert_var ''
       [ "$event" = "SessionEnd" ] && rm -f "$state_file"
       ;;
   esac

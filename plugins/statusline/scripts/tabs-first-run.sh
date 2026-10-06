@@ -1,9 +1,12 @@
 #!/bin/sh
 # SessionStart hook: until iTerm2 tab alerts are configured, ask Claude to offer setup.
-# Silent outside iTerm2, and once ~/.claude/statusline/tabs.conf exists (the
+# Silent outside iTerm2, in non-interactive sessions, and once ~/.claude/statusline/tabs.conf exists (the
 # /statusline:tabs skill writes it, even when the user just keeps the defaults).
 
 [ -n "$ITERM_SESSION_ID" ] || exit 0
+# Interactive sessions only: `claude -p` and SDK runs inherit ITERM_SESSION_ID too, and
+# can't answer the setup questions.
+case "${CLAUDE_CODE_ENTRYPOINT:-cli}" in cli) ;; *) exit 0 ;; esac
 [ -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/statusline/tabs.conf" ] && exit 0
 
 cat <<'EOF'

@@ -96,11 +96,12 @@ if [ -n "$cwd" ]; then
   if [ -n "$gh_host" ] && [ -f "$gh_hosts_yml" ]; then
     gh_account=$(awk -v h="$gh_host" '
       function indent(s) { match(s, /^ */); return RLENGTH }
-      /^[^[:space:]#]/ { in_host = ($1 == h ":"); users_indent = 0; next }
+      /^[^[:space:]#]/ { in_host = ($1 == h ":"); users_indent = 0; child = 0; next }
       !in_host || /^[[:space:]]*(#|$)/ { next }
       {
         i = indent($0)
-        if (users_indent && i > users_indent) { n++; next }
+        # count only the account names directly under users:, not their oauth_token lines
+        if (users_indent && i > users_indent) { if (!child) child = i; if (i == child) n++; next }
         users_indent = 0
         if ($1 == "users:") users_indent = i
         else if ($1 == "user:") user = $2
