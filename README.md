@@ -98,6 +98,10 @@ bash ~/.claude/statusline/install.sh --uninstall
 
 This removes only the settings that point at `~/.claude/statusline/`. Restore anything you had before from `previous-settings.json`, which is in the same folder.
 
+## Attribution
+
+The iterm2 coloring by hooks portion of this came from an idea by @corymvogt Brilliant
+
 ## License
 
 MIT
