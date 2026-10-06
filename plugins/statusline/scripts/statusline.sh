@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Claude Code status line.
 # Reads the status-line JSON on stdin and prints one line of ANSI-colored segments:
-#   🌿 branch | 🌳 worktree ← original | 🔀 PR | 📋 issue | 📁 dir | 🤖 model | ⚡ effort
+#   🌿 branch | 🌳 worktree ← original | 🔀 PR | 🐙 gh account | 📋 issue | 📁 dir | 🤖 model | ⚡ effort
 #   🚀 fast | 🧠 thinking | 📡 remote | 📊 context bar | ⏱️ 5h / 📅 7d limits | ✏️ lines | ⏰ time | 💰 cost
-# Requires: jq, git. Optional: gh (for the PR segment).
+# Requires: jq, git. Optional: gh (for the PR and gh account segments).
 #
 # Environment (set in settings.json "env" or your shell):
 #   STATUSLINE_LINEAR_PREFIXES Comma-separated Linear team keys, e.g. "ENG". Tried first.
@@ -85,6 +85,31 @@ if [ "$pr_ttl" != "0" ] && [ -n "$cwd" ] && [ -n "$branch" ] && command -v gh >/
   fi
 fi
 
+# --- active gh account for the origin remote's host, only when 2+ accounts are logged in ---
+# Read from gh's hosts.yml rather than running gh: instant and offline.
+gh_account=""
+if [ -n "$cwd" ]; then
+  gh_remote=$(git -C "$cwd" --no-optional-locks remote get-url origin 2>/dev/null)
+  # https://host/o/r, ssh://git@host/o/r, git@host:o/r -> host
+  gh_host=$(printf '%s' "$gh_remote" | sed -E -e 's#^[a-z+]+://##' -e 's#^[^@/]*@##' -e 's#[:/].*$##')
+  gh_hosts_yml="${GH_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/gh}/hosts.yml"
+  if [ -n "$gh_host" ] && [ -f "$gh_hosts_yml" ]; then
+    gh_account=$(awk -v h="$gh_host" '
+      function indent(s) { match(s, /^ */); return RLENGTH }
+      /^[^[:space:]#]/ { in_host = ($1 == h ":"); users_indent = 0; next }
+      !in_host || /^[[:space:]]*(#|$)/ { next }
+      {
+        i = indent($0)
+        if (users_indent && i > users_indent) { n++; next }
+        users_indent = 0
+        if ($1 == "users:") users_indent = i
+        else if ($1 == "user:") user = $2
+      }
+      END { if (n >= 2 && user != "") print user }
+    ' "$gh_hosts_yml" 2>/dev/null)
+  fi
+fi
+
 # --- issue key: Linear first, then Jira, else nothing ---
 # Each pass checks the branch, then the worktree's original branch, then a pin file, so a
 # Linear key anywhere beats a Jira key anywhere.
@@ -149,6 +174,11 @@ if [ -n "$pr_number" ]; then
     *) pr_color="\033[2m" ;;
   esac
   parts="${parts}$(printf "${pr_color}🔀 PR #%s %s${RESET}" "$pr_number" "$pr_state") "
+fi
+
+# gh account — blue; only shown when you're logged in to more than one
+if [ -n "$gh_account" ]; then
+  parts="${parts}$(printf "\033[34m🐙 %s${RESET}" "$gh_account") "
 fi
 
 # Issue — violet

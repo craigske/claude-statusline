@@ -11,6 +11,7 @@ A dense, color-graded status line for [Claude Code](https://code.claude.com), pl
 | 🌿 branch | Current git branch. Hidden inside a worktree |
 | 🌳 worktree | Worktree name ← the branch it was created from |
 | 🔀 PR | GitHub PR for the branch, colored by state (needs `gh`; cached 5 min) |
+| 🐙 gh account | The active `gh` account for the repo's host, read from `gh`'s `hosts.yml`. Shown only when you're logged in to two or more accounts there, since that's when pushing as the wrong one can happen |
 | 📋 issue | Linear issue key from the branch name, falling back to a Jira key, or a pinned one. Hidden if neither is found |
 | 📁 🤖 ⚡ 🚀 🧠 | Directory, model, effort level, fast mode, extended thinking |
 | 📡 remote | Session is being driven remotely (claude.ai / FleetView). The input field isn't documented yet, so this probes likely names |
@@ -22,7 +23,7 @@ The subagent line renders each row in the agent panel as `🔭 Explore · haiku-
 
 ## Install
 
-Requires `bash`, `jq` and `git`. `gh` is optional and only needed for the PR segment.
+Requires `bash`, `jq` and `git`. `gh` is optional and only needed for the PR and gh account segments.
 
 **As a plugin** (recommended, updates through `/plugin`):
 
