@@ -56,6 +56,20 @@ color_working=$(setting STATUSLINE_TAB_WORKING "#00d75f")
 color_waiting=$(setting STATUSLINE_TAB_WAITING "#ff9500")
 color_unread=$(setting STATUSLINE_TAB_UNREAD "#0a84ff")
 
+# take_lock NAME: wait until this process holds $state_dir/NAME.lock. Background jobs use it
+# to run one at a time per session. Call it in a subshell; the lock is released on exit.
+take_lock() {
+  lock="$state_dir/$1.lock"
+  tries=0
+  until mkdir "$lock" 2>/dev/null; do
+    tries=$((tries + 1))
+    # A lock held this long is stale (a killed job); take it over.
+    [ "$tries" -ge 100 ] && { rmdir "$lock" 2>/dev/null; tries=0; }
+    sleep 0.05
+  done
+  trap 'rmdir "$lock" 2>/dev/null' EXIT
+}
+
 # --- status dot: hand the event to iTerm2's cc-status, if installed ---
 if [ "$want_dot" = 1 ]; then
   for cc_status in /Applications/iTerm.app/Contents/Resources/utilities/cc-status "$HOME/.config/iterm2/cc-status"; do
@@ -64,18 +78,10 @@ if [ "$want_dot" = 1 ]; then
       # tool. Detached jobs can overlap, so run them one at a time per session and drop any
       # that a newer event has superseded: the newest event always runs last.
       cc_seq="$state_dir/cc-$sid.seq"
-      cc_lock="$state_dir/cc-$sid.lock"
       cc_token="$$.$(date +%s)"
       printf '%s' "$cc_token" > "$cc_seq"
       (
-        tries=0
-        until mkdir "$cc_lock" 2>/dev/null; do
-          tries=$((tries + 1))
-          # A lock held this long is stale (a killed job); take it over.
-          [ "$tries" -ge 60 ] && { rmdir "$cc_lock" 2>/dev/null; tries=0; }
-          sleep 0.05
-        done
-        trap 'rmdir "$cc_lock" 2>/dev/null' EXIT
+        take_lock "cc-$sid"
         [ "$(cat "$cc_seq" 2>/dev/null)" = "$cc_token" ] || exit 0
         printf '%s' "$input" | "$cc_status"
       ) </dev/null >/dev/null 2>&1 &
@@ -123,12 +129,17 @@ printf '%s' "$state" > "$state_file"
 project=${cwd##*/}
 [ -n "$project" ] || project=claude
 
-# Everything below talks to iTerm2; run it detached so the hook returns at once.
+# Everything below talks to iTerm2; run it detached so the hook returns at once. Jobs run
+# one at a time per session, and each one stops once a newer event has replaced its state,
+# so the newest state is always applied last.
 (
+  take_lock "tab-$sid"
+
   it2() { "$IT2" "$@" </dev/null; }
 
-  # Jobs run concurrently; skip iTerm2 changes once a newer event has replaced this state.
   current() { [ "$(cat "$state_file" 2>/dev/null)" = "$state" ]; }
+  current || exit 0
+  speak=""
 
   set_alert_var() { current && it2 session set-var user.claude_alert "$1" --session "$sid"; }
 
@@ -150,11 +161,11 @@ project=${cwd##*/}
 
   # $1 = banner text, $2 = spoken phrase
   alert() {
-    if [ "$want_alerts" = 1 ]; then
+    if [ "$want_alerts" = 1 ] && current; then
       tty=$(session_tty)
       [ -w "$tty" ] && printf '\033]1337;RequestAttention=1\007\033]9;%s\007' "$1" > "$tty"
     fi
-    [ -n "$voice" ] && [ -n "$2" ] && command -v say >/dev/null && say -v "$voice" "$2"
+    speak="$2"
   }
 
   # Focused = iTerm2 has a key window and this is its current session.
@@ -177,7 +188,7 @@ project=${cwd##*/}
     idle)
       focused; is_focused=$?
       # The focus lookup is slow; drop this job if a newer event has landed.
-      [ "$(cat "$state_file" 2>/dev/null)" = idle ] || exit 0
+      current || exit 0
       if [ "$is_focused" -eq 0 ]; then
         clear_color
         set_alert_var ''
@@ -193,6 +204,11 @@ project=${cwd##*/}
       [ "$event" = "SessionEnd" ] && rm -f "$state_file"
       ;;
   esac
+
+  # Speaking takes seconds, so release the lock first, and stay quiet if the state has
+  # already moved on (a permission prompt answered right away, say).
+  rmdir "$lock" 2>/dev/null; trap - EXIT
+  [ -n "$speak" ] && [ -n "$voice" ] && current && command -v say >/dev/null && say -v "$voice" "$speak"
 ) </dev/null >/dev/null 2>&1 &
 
 exit 0
