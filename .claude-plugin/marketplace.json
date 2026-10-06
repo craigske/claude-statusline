@@ -1,0 +1,12 @@
+{
+  "name": "claude-statusline",
+  "owner": { "name": "Craig" },
+  "description": "A Claude Code status line and subagent status line, packaged as a plugin.",
+  "plugins": [
+    {
+      "name": "statusline",
+      "source": "./plugins/statusline",
+      "description": "A dense, color-graded Claude Code status line plus a subagent status line."
+    }
+  ]
+}

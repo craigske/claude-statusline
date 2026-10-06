@@ -1,0 +1,11 @@
+{
+  "name": "statusline",
+  "displayName": "Status Line",
+  "version": "1.0.0",
+  "description": "A dense, color-graded Claude Code status line (branch, worktree, PR, issue key, model, context, rate limits, cost) plus a subagent status line.",
+  "author": { "name": "Craig", "url": "https://github.com/craigske" },
+  "homepage": "https://github.com/craigske/claude-statusline",
+  "repository": "https://github.com/craigske/claude-statusline",
+  "license": "MIT",
+  "keywords": ["statusline", "status-line", "git", "worktree"]
+}
